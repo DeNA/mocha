@@ -53,6 +53,12 @@ var images = {
   , pass: __dirname + '/../images/ok.png'
 };
 
+/**
+ * Prepares.
+ */
+
+var prepares = [];
+
 // options
 
 program
@@ -71,6 +77,7 @@ program
   .option('-f, --fgrep <string>', 'only run tests containing <string>')
   .option('-gc, --expose-gc', 'expose gc extension')
   .option('-i, --invert', 'inverts --grep and --fgrep matches')
+  .option('-p, --prepare <name>', 'run a given script to prepare tests before loading them')
   .option('-r, --require <name>', 'require the given module')
   .option('-s, --slow <ms>', '"slow" test threshold in milliseconds [75]')
   .option('-t, --timeout <ms>', 'set test-case timeout in milliseconds [2000]')
@@ -164,6 +171,14 @@ program.on('interfaces', function(){
   console.log('    exports');
   console.log('');
   process.exit();
+});
+
+// -p, --prepare
+
+program.on('prepare', function(mod){
+  if (prepares.indexOf(mod) < 0) {
+    prepares.push(mod);
+  }
 });
 
 // -r, --require
@@ -330,72 +345,111 @@ if (program.sort) {
   files.sort();
 }
 
-// --watch
 
 var runner;
-if (program.watch) {
-  console.log();
-  hideCursor();
-  process.on('SIGINT', function(){
-    showCursor();
-    console.log('\n');
-    process.exit();
-  });
 
-
-  var watchFiles = utils.files(cwd, [ 'js' ].concat(program.watchExtensions));
-  var runAgain = false;
-
-  function loadAndRun() {
-    try {
-      mocha.files = files;
-      runAgain = false;
-      runner = mocha.run(function(){
-        runner = null;
-        if (runAgain) {
-          rerun();
-        }
-      });
-    } catch(e) {
-      console.log(e.stack);
-    }
+prepareAll(function (err) {
+  if (err) {
+    console.error(err);
+    process.exit(1);
   }
 
-  function purge() {
-    watchFiles.forEach(function(file){
-      delete require.cache[file];
+  // --watch
+
+  if (program.watch) {
+    console.log();
+    hideCursor();
+    process.on('SIGINT', function(){
+      showCursor();
+      console.log('\n');
+      process.exit();
     });
-  }
 
-  loadAndRun();
 
-  function rerun() {
-    purge();
-    stop()
-    if (!program.grep)
-      mocha.grep(null);
-    mocha.suite = mocha.suite.clone();
-    mocha.suite.ctx = new Mocha.Context;
-    mocha.ui(program.ui);
-    loadAndRun();
-  }
+    var watchFiles = utils.files(cwd, [ 'js' ].concat(program.watchExtensions));
+    var runAgain = false;
 
-  utils.watch(watchFiles, function(){
-    runAgain = true;
-    if (runner) {
-      runner.abort();
-    } else {
-      rerun();
+    function loadAndRun() {
+      try {
+        mocha.files = files;
+        runAgain = false;
+        runner = mocha.run(function(){
+          runner = null;
+          if (runAgain) {
+            rerun();
+          }
+        });
+      } catch(e) {
+        console.log(e.stack);
+      }
     }
-  });
 
-  return;
+    function purge() {
+      watchFiles.forEach(function(file){
+        delete require.cache[file];
+      });
+    }
+
+    loadAndRun();
+
+    function rerun() {
+      purge();
+      stop()
+      if (!program.grep)
+        mocha.grep(null);
+      mocha.suite = mocha.suite.clone();
+      mocha.suite.ctx = new Mocha.Context;
+      mocha.ui(program.ui);
+      loadAndRun();
+    }
+
+    utils.watch(watchFiles, function(){
+      runAgain = true;
+      if (runner) {
+        runner.abort();
+      } else {
+        rerun();
+      }
+    });
+
+    return;
+  }
+
+  // load
+
+  mocha.files = files;
+  runner = mocha.run(program.exit ? exit : exitLater);
+});
+
+function prepareAll(done) {
+  if (prepares.length === 0) {
+    return done();
+  }
+
+  var mod = prepares.shift();
+  if (!exists(mod) && !exists(mod + '.js')) {
+    return done(new Error('prepare file not found: ' + mod));
+  }
+
+  var fn = require(resolve(mod));
+  if (typeof fn !== 'function') {
+    return done(new Error('prepare file not expose a function: ' + mod));
+  }
+
+  function cb(err) {
+    if (err) {
+      console.error('prepare failed:', err);
+      return done(new Error('prepare failed: ' + err.message + ', in ' + mod));
+    }
+    prepareAll(done);
+  }
+
+  var promise = fn(cb);
+  if (promise && typeof promise.then === 'function') {
+    promise.then(cb, cb);
+  }
 }
 
-// load
-
-mocha.files = files;
-runner = mocha.run(program.exit ? exit : exitLater);
 
 function exitLater(code) {
   process.on('exit', function() { process.exit(code) })

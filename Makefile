@@ -36,7 +36,7 @@ lib-cov:
 
 test: test-unit
 
-test-all: test-bdd test-tdd test-qunit test-exports test-unit test-integration test-jsapi test-compilers test-glob test-requires test-reporters test-only
+test-all: test-bdd test-tdd test-qunit test-exports test-unit test-integration test-jsapi test-compilers test-glob test-requires test-prepares test-reporters test-only
 
 test-jsapi:
 	@node test/jsapi
@@ -69,6 +69,13 @@ test-requires:
 		--require test/acceptance/require/c.js \
 		--require test/acceptance/require/d.coffee \
 		test/acceptance/require/require.js
+
+test-prepares:
+	@./bin/mocha \
+		--reporter $(REPORTER) \
+		--prepare test/acceptance/prepare/p1.js \
+		-p test/acceptance/prepare/p2.js \
+		test/acceptance/prepare/prepare.js
 
 test-bdd:
 	@./bin/mocha \
